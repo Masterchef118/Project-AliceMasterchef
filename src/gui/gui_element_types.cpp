@@ -222,10 +222,12 @@ message_result edit_box_element_base::on_lbutton_down(sys::state& state, int32_t
 }
 
 void edit_box_element_base::on_text(sys::state& state, char ch) noexcept {
-	auto s = std::string(get_text(state)).insert(edit_index, 1, ch);
-	edit_index++;
-	set_text(state, s);
-	edit_box_update(state, s);
+	if(ch >= 32) {
+		auto s = std::string(get_text(state)).insert(edit_index, 1, ch);
+		edit_index++;
+		set_text(state, s);
+		edit_box_update(state, s);
+	}
 }
 
 message_result edit_box_element_base::on_key_down(sys::state& state, sys::virtual_key key, sys::key_modifiers mods) noexcept {
@@ -699,7 +701,100 @@ void window_element_base::on_drag(sys::state& state, int32_t oldx, int32_t oldy,
 	}
 }
 
-void listbox_element_base::render(sys::state& state, int32_t x, int32_t y) noexcept {
+template<class RowConT>
+class wrapped_row_content {
+public:
+	RowConT content;
+	wrapped_row_content() {
+		content = RowConT{};
+	}
+	wrapped_row_content(RowConT con) {
+		content = con;
+	}
+};
+
+template<class RowConT>
+message_result listbox_row_element_base<RowConT>::get(sys::state& state, Cyto::Any& payload) noexcept {
+	if(payload.holds_type<wrapped_row_content<RowConT>>()) {
+		content = any_cast<wrapped_row_content<RowConT>>(payload).content;
+		update(state);
+	}
+	return message_result::unseen;
+}
+
+template<class RowConT>
+message_result listbox_row_button_base<RowConT>::get(sys::state& state, Cyto::Any& payload) noexcept {
+	if(payload.holds_type<wrapped_row_content<RowConT>>()) {
+		content = any_cast<wrapped_row_content<RowConT>>(payload).content;
+		update(state);
+	}
+	return message_result::unseen;
+}
+
+template<class RowConT>
+message_result listbox_row_button_base<RowConT>::on_scroll(sys::state& state, int32_t x, int32_t y, float amount, sys::key_modifiers mods) noexcept {
+	return parent->impl_on_scroll(state, x, y, amount, mods);
+}
+
+template<class RowWinT, class RowConT>
+void listbox_element_base<RowWinT, RowConT>::update(sys::state& state) {
+	if(is_reversed()) {
+		auto i = int32_t(row_contents.size()) - scroll_pos - 1;
+		for(size_t rw_i = row_windows.size() - 1; rw_i > 0; rw_i--) {
+			if(i >= 0) {
+				Cyto::Any payload = wrapped_row_content<RowConT>{ row_contents[i--] };
+				row_windows[rw_i]->impl_get(state, payload);
+				row_windows[rw_i]->set_visible(state, true);
+			} else {
+				row_windows[rw_i]->set_visible(state, false);
+			}
+		}
+	} else {
+		auto i = size_t(scroll_pos);
+		for(RowWinT* row_window : row_windows) {
+			if(i < row_contents.size()) {
+				Cyto::Any payload = wrapped_row_content<RowConT>{ row_contents[i++] };
+				row_window->impl_get(state, payload);
+				row_window->set_visible(state, true);
+			} else {
+				row_window->set_visible(state, false);
+			}
+		}
+	}
+}
+
+template<class RowWinT, class RowConT>
+message_result listbox_element_base<RowWinT, RowConT>::on_scroll(sys::state& state, int32_t x, int32_t y, float amount, sys::key_modifiers mods) noexcept {
+	auto old_scroll_pos = scroll_pos;
+	if(amount > 0) {
+		scroll_pos = std::max(scroll_pos - 1, 0);
+	} else if(row_contents.size() > row_windows.size()) {
+		scroll_pos = std::min(scroll_pos + 1, int32_t(row_contents.size() - row_windows.size()));
+	}
+	if(scroll_pos != old_scroll_pos) {
+		update(state);
+	}
+	return message_result::consumed;
+}
+
+template<class RowWinT, class RowConT>
+void listbox_element_base<RowWinT, RowConT>::on_create(sys::state& state) noexcept {
+	int16_t current_y = 0;
+	int16_t subwindow_y_size = 0;
+	while(current_y + subwindow_y_size < base_data.size.y) {
+		auto ptr = make_element_by_type<RowWinT>(state, get_row_element_name());
+		row_windows.push_back(static_cast<RowWinT*>(ptr.get()));
+		int16_t offset = ptr->base_data.position.y;
+		ptr->base_data.position.y += current_y;
+		subwindow_y_size = ptr->base_data.size.y;
+		current_y += ptr->base_data.size.y + offset;
+		add_child_to_front(std::move(ptr));
+	}
+	update(state);
+}
+
+template<class RowWinT, class RowConT>
+void listbox_element_base<RowWinT, RowConT>::render(sys::state& state, int32_t x, int32_t y) noexcept {
 	dcon::gfx_object_id gid = base_data.data.list_box.background_image;
 	if(gid) {
 		auto& gfx_def = state.ui_defs.gfx[gid];

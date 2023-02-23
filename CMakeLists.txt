@@ -35,7 +35,8 @@ else()
 	target_compile_definitions(Alice PRIVATE "IGNORE_REAL_FILES_TESTS=1")
 endif()
 
-add_compile_definitions(VE_NO_TBB)
+add_compile_definitions(PREFER_ONE_TBB)
+
 if(WIN32)
 	# string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 	# string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
@@ -68,8 +69,8 @@ if(WIN32)
 else() # GCC or CLANG
 	target_compile_options(Alice PRIVATE
 									# -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter
-		$<$<CONFIG:Debug>:			-g>
-		$<$<NOT:$<CONFIG:Debug>>: 	-O3>)
+		$<$<CONFIG:Debug>:			-msse4.1 -g>
+		$<$<NOT:$<CONFIG:Debug>>: 	-msse4.1 -O3>)
 endif()
 
 # Include sub-projects.
@@ -97,6 +98,8 @@ target_precompile_headers(Alice
 	PRIVATE <cmath>
 	PRIVATE <functional>
 	PRIVATE <cstdlib>
+	PRIVATE <atomic>
+	PRIVATE <chrono>
 	PRIVATE [["simple_fs.hpp"]]
 	PRIVATE [["constants.hpp"]]
 	PRIVATE [["unordered_dense.h"]]
@@ -107,8 +110,7 @@ target_precompile_headers(Alice
 	PRIVATE [["date_interface.hpp"]]
 )
 
-add_compile_definitions(VE_NO_TBB)
-
+target_link_libraries(Alice PRIVATE dependency_tbb)
 target_link_libraries(Alice PRIVATE dependency_DataContainer)
 target_link_libraries(Alice PRIVATE libglew_static)
 target_link_libraries(Alice PRIVATE dependency_unordered_dense)
@@ -141,6 +143,7 @@ target_include_directories(Alice PUBLIC
 	${PROJECT_SOURCE_DIR}/src/culture
 	${PROJECT_SOURCE_DIR}/src/military
 	${PROJECT_SOURCE_DIR}/src/scripting
+	${PROJECT_SOURCE_DIR}/src/zstd
 	"${glew_SOURCE_DIR}/include/GL"
 	"ankerl")
 

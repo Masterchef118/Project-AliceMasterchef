@@ -334,6 +334,11 @@ namespace parsers {
 
 		dcon::text_key noimage;
 
+
+		dcon::modifier_id modifier_by_terrain_index[64] = {}; // these are the given mappings from the raw palette index to terrain type
+		uint32_t color_by_terrain_index[64] = { 0 }; // these are the (packed) colors given for the terrain type modifier at the given palette index
+		dcon::modifier_id ocean_terrain;
+
 		scenario_building_context(sys::state& state) : state(state) { }
 
 		dcon::national_variable_id get_national_variable(std::string const& name);
@@ -769,6 +774,12 @@ namespace parsers {
 					constructed_definition.offsets[i] = uint8_t(sys::national_mod_offsets::supply_limit);
 				} else if(constructed_definition.offsets[i] == sys::provincial_mod_offsets::combat_width) {
 					constructed_definition.offsets[i] = uint8_t(sys::national_mod_offsets::combat_width);
+				} else if(constructed_definition.offsets[i] < sys::provincial_mod_offsets::count) {
+					--this->next_to_add;
+					constructed_definition.offsets[i] = constructed_definition.offsets[this->next_to_add];
+					constructed_definition.values[i] = constructed_definition.values[this->next_to_add];
+					--i;
+					continue;
 				}
 				constructed_definition.offsets[i] += 1;
 			}
@@ -1053,7 +1064,7 @@ namespace parsers {
 	};
 
 	void read_map_colors(char const* start, char const* end, error_handler& err, scenario_building_context& context);
-
+	void read_map_adjacency(char const* start, char const* end, error_handler& err, scenario_building_context& context);
 
 	struct terrain_modifier : public modifier_base {
 		color_from_3i color;

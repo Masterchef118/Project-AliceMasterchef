@@ -10,6 +10,7 @@
 #include "gui_console.hpp"
 #include "gui_province_window.hpp"
 #include <algorithm>
+#include <thread>
 
 namespace sys {
 	//
@@ -127,10 +128,16 @@ namespace sys {
 			ui_state.edit_target->on_text(*this, c);
 	}
 	void state::render() { // called to render the frame may (and should) delay returning until the frame is rendered, including waiting for vsync
+		auto game_state_was_updated = game_state_updated.exchange(false, std::memory_order::acq_rel);
+		if(game_state_was_updated) {
+			ui_state.root->impl_on_update(*this);
+			// TODO map needs to refresh itself with data
+			// TODO also need to update any tooltips (which probably exist outside the root container)
+		}
 		glClearColor(0.5, 0.5, 0.5, 1.0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-		map_display.render(x_size, y_size);
+		map_display.render(*this, x_size, y_size);
 
 		// UI rendering
 		glUseProgram(open_gl.ui_shader_program);
@@ -345,6 +352,72 @@ namespace sys {
 		auto common = open_directory(root, NATIVE("common"));
 
 		parsers::scenario_building_context context(*this);
+
+		auto map = open_directory(root, NATIVE("map"));
+		// parse default.map
+		{
+			auto def_map_file = open_file(map, NATIVE("default.map"));
+			if(def_map_file) {
+				auto content = view_contents(*def_map_file);
+				err.file_name = "default.map";
+				parsers::token_generator gen(content.data, content.data + content.file_size);
+				parsers::parse_default_map_file(gen, err, context);
+			} else {
+				err.fatal = true;
+				err.accumulated_errors += "File map/default.map could not be opened\n";
+			}
+		}
+		// parse definition.csv
+		{
+			auto def_csv_file = open_file(map, NATIVE("definition.csv"));
+			if(def_csv_file) {
+				auto content = view_contents(*def_csv_file);
+				err.file_name = "definition.csv";
+				parsers::read_map_colors(content.data, content.data + content.file_size, err, context);
+			} else {
+				err.fatal = true;
+				err.accumulated_errors += "File map/definition.csv could not be opened\n";
+			}
+		}
+
+		/*
+		240,208,1 Tsushima --> 240,208,0 Nagasaki
+		128,65,97 Fehmarn--> 128,65,96 Kiel
+		*/
+
+		if(auto it = context.map_color_to_province_id.find(sys::pack_color(240, 208, 0));
+			it != context.map_color_to_province_id.end() && context.map_color_to_province_id.find(sys::pack_color(240, 208, 1)) == context.map_color_to_province_id.end()) {
+			context.map_color_to_province_id.insert_or_assign(sys::pack_color(240, 208, 1), it->second);
+		}
+		if(auto it = context.map_color_to_province_id.find(sys::pack_color(128, 65, 96));
+			it != context.map_color_to_province_id.end() && context.map_color_to_province_id.find(sys::pack_color(128, 65, 97)) == context.map_color_to_province_id.end()) {
+			context.map_color_to_province_id.insert_or_assign(sys::pack_color(128, 65, 97), it->second);
+		}
+
+		// 1, 222, 200 --> 51, 221, 251 -- randomly misplaced sea
+
+		if(auto it = context.map_color_to_province_id.find(sys::pack_color(51, 221, 251));
+			it != context.map_color_to_province_id.end() && context.map_color_to_province_id.find(sys::pack_color(1, 222, 200)) == context.map_color_to_province_id.end()) {
+			context.map_color_to_province_id.insert_or_assign(sys::pack_color(1, 222, 200), it->second);
+		}
+
+		// 94, 53, 41 --> 89, 202, 202 -- random dots in the sea tiles
+		// 247, 248, 245 -- > 89, 202, 202
+
+		if(auto it = context.map_color_to_province_id.find(sys::pack_color(89, 202, 202));
+			it != context.map_color_to_province_id.end() && context.map_color_to_province_id.find(sys::pack_color(94, 53, 41)) == context.map_color_to_province_id.end()) {
+			context.map_color_to_province_id.insert_or_assign(sys::pack_color(94, 53, 41), it->second);
+		}
+		if(auto it = context.map_color_to_province_id.find(sys::pack_color(89, 202, 202));
+			it != context.map_color_to_province_id.end() && context.map_color_to_province_id.find(sys::pack_color(247, 248, 245)) == context.map_color_to_province_id.end()) {
+			context.map_color_to_province_id.insert_or_assign(sys::pack_color(247, 248, 245), it->second);
+		}
+
+
+		std::thread map_loader([&]() {
+			map_display.load_map_data(context);
+		});
+
 		// Read national tags from countries.txt
 		{
 			auto countries = open_file(common, NATIVE("countries.txt"));
@@ -575,32 +648,7 @@ namespace sys {
 			}
 		}
 
-		auto map = open_directory(root, NATIVE("map"));
-		// parse default.map
-		{
-			auto def_map_file = open_file(map, NATIVE("default.map"));
-			if(def_map_file) {
-				auto content = view_contents(*def_map_file);
-				err.file_name = "default.map";
-				parsers::token_generator gen(content.data, content.data + content.file_size);
-				parsers::parse_default_map_file(gen, err, context);
-			} else {
-				err.fatal = true;
-				err.accumulated_errors += "File map/default.map could not be opened\n";
-			}
-		}
-		// parse definition.csv
-		{
-			auto def_csv_file = open_file(map, NATIVE("definition.csv"));
-			if(def_csv_file) {
-				auto content = view_contents(*def_csv_file);
-				err.file_name = "definition.csv";
-				parsers::read_map_colors(content.data, content.data + content.file_size, err, context);
-			} else {
-				err.fatal = true;
-				err.accumulated_errors += "File map/definition.csv could not be opened\n";
-			}
-		}
+		
 		// parse terrain.txt
 		{
 			auto terrain_file = open_file(map, NATIVE("terrain.txt"));
@@ -1034,7 +1082,7 @@ namespace sys {
 						break;
 					}
 				}
-				if(last - start_of_name >= 6) {
+				if(last - start_of_name >= 6 && file_name.ends_with(NATIVE("_oob.txt"))) {
 					auto utf8name = simple_fs::native_to_utf8(native_string_view(start_of_name, last - start_of_name));
 
 					if(auto it = context.map_of_ident_names.find(nations::tag_to_int(utf8name[0], utf8name[1], utf8name[2])); it != context.map_of_ident_names.end()) {
@@ -1138,7 +1186,106 @@ namespace sys {
 				}
 			}
 		}
+
+		map_loader.join();
+
+		// touch up adjacencies
+		world.for_each_province_adjacency([&](dcon::province_adjacency_id id) {
+			auto frel = fatten(world, id);
+			auto prov_a = frel.get_connected_provinces(0);
+			auto prov_b = frel.get_connected_provinces(1);
+			if(prov_a.id.index() < province_definitions.first_sea_province.index() &&
+				prov_b.id.index() >= province_definitions.first_sea_province.index()) {
+				frel.get_type() |= province::border::coastal_bit;
+			} else if(prov_a.id.index() >= province_definitions.first_sea_province.index() &&
+				prov_b.id.index() < province_definitions.first_sea_province.index()) {
+				frel.get_type() |= province::border::coastal_bit;
+			}
+			if(prov_a.get_state_from_abstract_state_membership() != prov_b.get_state_from_abstract_state_membership()) {
+				frel.get_type() |= province::border::state_bit;
+			}
+			if(prov_a.get_nation_from_province_ownership() != prov_b.get_nation_from_province_ownership()) {
+				frel.get_type() |= province::border::national_bit;
+			}
+		});
+
+		// fill in the terrain type
+
+		for(int32_t i = 0; i < province_definitions.first_sea_province.index(); ++i) {
+			dcon::province_id id{ dcon::province_id::value_base_t(i) };
+			if(!world.province_get_terrain(id)) { // don't overwrite if set by the history file
+				auto modifier = context.modifier_by_terrain_index[map_display.median_terrain_type[province::to_map_id(id)]];
+				world.province_set_terrain(id, modifier);
+			}
+		}
+		for(int32_t i = province_definitions.first_sea_province.index(); i < int32_t(world.province_size()); ++i) {
+			dcon::province_id id{ dcon::province_id ::value_base_t(i) };
+			world.province_set_terrain(id, context.ocean_terrain);
+		}
+
 		if(err.accumulated_errors.length() > 0)
 			window::emit_error_message(err.accumulated_errors, err.fatal);
+	}
+
+	void state::fill_unsaved_data() { // reconstructs derived values that are not directly saved after a save has been loaded
+		world.nation_resize_fluctuating_modifier_values(sys::national_mod_offsets::count - provincial_mod_offsets::count);
+		world.nation_resize_static_modifier_values(sys::national_mod_offsets::count - provincial_mod_offsets::count);
+		world.nation_resize_rgo_goods_output(world.commodity_size());
+		world.nation_resize_factory_goods_output(world.commodity_size());
+		world.nation_resize_factory_goods_throughput(world.commodity_size());
+		world.nation_resize_rgo_size(world.commodity_size());
+		world.nation_resize_rebel_org_modifier(world.rebel_type_size());
+		world.nation_resize_active_unit(uint32_t(military_definitions.unit_base_definitions.size()));
+		world.nation_resize_active_crime(uint32_t(culture_definitions.crimes.size()));
+		world.nation_resize_active_building(world.factory_type_size());
+		world.nation_resize_unit_stats(uint32_t(military_definitions.unit_base_definitions.size()));
+
+		world.province_resize_modifier_values(provincial_mod_offsets::count);
+
+		world.for_each_nation([&](dcon::nation_id id) {
+			auto ident = world.nation_get_identity_from_identity_holder(id);
+			world.nation_set_name(id, world.national_identity_get_name(ident));
+			world.nation_set_adjective(id, world.national_identity_get_adjective(ident));
+			world.nation_set_color(id, world.national_identity_get_color(ident));
+		});
+
+		military::reset_unit_stats(*this);
+		culture::repopulate_technology_effects(*this);
+		culture::repopulate_invention_effects(*this);
+		military::apply_base_unit_stat_modifiers(*this);
+
+		sys::repopulate_modifier_effects(*this);
+		province::update_connected_regions(*this);
+	}
+
+	constexpr inline int32_t game_speed[] = {
+		0, //speed 0
+		2000, // speed 1 -- 2 seconds
+		1000, // speed 2 -- 1 second
+		500, // speed 3 -- 0.5 seconds
+		250, // speed 4 -- 0.25 seconds
+	};
+
+	void state::game_loop() {
+		while(quit_signaled.load(std::memory_order::acquire) == false) {
+			auto speed = actual_game_speed.load(std::memory_order::acquire);
+			if(speed <= 0 || internally_paused == true) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(15));
+			} else {
+				auto entry_time = std::chrono::steady_clock::now();
+				auto ms_count = std::chrono::duration_cast<std::chrono::milliseconds>(entry_time - last_update).count();
+
+				if(speed >= 5 || ms_count >= game_speed[speed]) { /*enough time has passed*/
+					last_update = entry_time;
+
+					// do update logic
+					current_date += 1;
+
+					game_state_updated.store(true, std::memory_order::release);
+				} else {
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				}
+			}
+		}
 	}
 }

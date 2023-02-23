@@ -15,8 +15,6 @@ inline constexpr dcon::province_id from_map_id(uint16_t id) {
 }
 struct global_provincial_state {
 	dcon::province_id first_sea_province;
-	dcon::modifier_id modifier_by_terrain_index[64] = {}; // these are the given mappings from the raw palette index to terrain type
-	uint32_t color_by_terrain_index[64] = { 0 }; // these are the (packed) colors given for the terrain type modifier at the given palette index
 
 	// NOTE: these should not be referred to directly by the game mechanics
 	//       they are, however, useful for the ui to filter provinces / nations by continent
@@ -40,5 +38,6 @@ inline int32_t get_fort_level(uint8_t value) {
 inline int32_t get_naval_base_level(uint8_t value) {
 	return int32_t((value >> 4) & 0x0F);
 }
+void update_connected_regions(sys::state& state);
 }
 
