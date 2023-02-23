@@ -514,7 +514,12 @@ void display_data::update() {
 
 	glm::vec2 velocity;
 
-	velocity = (pos_velocity + scroll_pos_velocity) * (seconds_since_last_update / zoom);
+	if(zoom_change > 0) {
+		velocity = ((pos_velocity + scroll_pos_velocity) * (seconds_since_last_update / zoom)) / 3.f;
+	}
+	else {
+		velocity = ((pos_velocity + scroll_pos_velocity) * (seconds_since_last_update / zoom)) / 6.f;
+	}
 	velocity.x *= size.y / size.x;
 	pos += velocity;
 
@@ -586,15 +591,9 @@ void display_data::on_mouse_wheel(int32_t x, int32_t y, int32_t screen_size_x, i
 
     auto mouse_pos = glm::vec2(x, y);
     auto screen_size = glm::vec2(screen_size_x, screen_size_y);
-	scroll_pos_velocity = mouse_pos - screen_size * .5f;
-	scroll_pos_velocity /= screen_size;
-	scroll_pos_velocity *= zoom_speed_factor;
-	if(zoom_change > 0) {
-		scroll_pos_velocity /= 3.f;
-	}
-	else if(zoom_change < 0) {
-		scroll_pos_velocity /= 6.f;
-	}
+    scroll_pos_velocity = mouse_pos - screen_size * .5f;
+    scroll_pos_velocity /= screen_size;
+    scroll_pos_velocity *= zoom_speed_factor;
 }
 
 void display_data::on_mouse_move(int32_t x, int32_t y, int32_t screen_size_x, int32_t screen_size_y, sys::key_modifiers mod) {
